@@ -1,0 +1,364 @@
+{
+    "name": "⏰ Deadline Checker (10AM IST)",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "30 4 * * *"
+                        }
+                    ]
+                }
+            },
+            "id": "deadline-trigger",
+            "name": "⏰ Deadline Trigger (10AM IST)",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1.1,
+            "position": [
+                180,
+                300
+            ],
+            "notes": "Fires at 04:30 UTC = 10:00 AM IST every day"
+        },
+        {
+            "parameters": {
+                "operation": "read",
+                "documentId": {
+                    "__rl": true,
+                    "value": "={{$env.TRACKER_SHEET_ID}}",
+                    "mode": "id"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "Tracker",
+                    "mode": "name"
+                },
+                "options": {
+                    "headerRow": 1
+                }
+            },
+            "id": "read-tracker-deadline",
+            "name": "📊 Read Today's Tracker Data",
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.4,
+            "position": [
+                400,
+                300
+            ],
+            "credentials": {
+                "googleSheetsOAuth2Api": {
+                    "id": "google-sheets-cred",
+                    "name": "Google Sheets OAuth2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Check if today's video was posted successfully\nconst trackerRows = $input.all();\n\nconst today = new Date();\nconst todayIST = today.toLocaleDateString('en-IN', {\n  timeZone: 'Asia/Kolkata',\n  year: 'numeric',\n  month: '2-digit',\n  day: '2-digit'\n});\n\nconst nowIST = today.toLocaleString('en-IN', {\n  timeZone: 'Asia/Kolkata',\n  hour: '2-digit',\n  minute: '2-digit',\n  second: '2-digit',\n  hour12: true\n});\n\n// Find today's row\nconst todayRow = trackerRows.find(row => {\n  const postedDate = row.json['Posted Date'];\n  const status = row.json['Status'];\n  return postedDate === todayIST && status === 'POSTED';\n});\n\nif (todayRow) {\n  return [{\n    json: {\n      posted: true,\n      todayIST,\n      nowIST,\n      videoName: todayRow.json['Video Name'] || 'Unknown',\n      youtubeURL: todayRow.json['YouTube URL'] || 'N/A',\n      instagramURL: todayRow.json['Instagram URL'] || 'N/A',\n      postedAt: todayRow.json['Posted At'] || 'N/A',\n      totalPosted: trackerRows.filter(r => r.json['Status'] === 'POSTED').length\n    }\n  }];\n}\n\n// Not posted yet — calculate how late we are\nconst deadlineIST = new Date(today.toLocaleDateString('en-IN', {timeZone:'Asia/Kolkata'}) + ' 10:00:00 IST');\nconst minutesLate = Math.round((today.getTime() - deadlineIST.getTime()) / 60000);\n\nreturn [{\n  json: {\n    posted: false,\n    todayIST,\n    nowIST,\n    minutesLate: minutesLate > 0 ? minutesLate : 0,\n    totalPosted: trackerRows.filter(r => r.json['Status'] === 'POSTED').length,\n    lastPosted: trackerRows\n      .filter(r => r.json['Status'] === 'POSTED')\n      .pop()?.json || {}\n  }\n}];\n"
+            },
+            "id": "check-posted-today",
+            "name": "🔍 Check If Posted Today",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                620,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "id": "check-posted",
+                            "leftValue": "={{$json.posted}}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "equal"
+                            }
+                        }
+                    ],
+                    "combinator": "and"
+                },
+                "options": {}
+            },
+            "id": "was-it-posted",
+            "name": "❓ Was it Posted?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                840,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Build post-confirmation summary report\nconst data = $json;\n\n// Everything posted fine — just a 10AM confirmation\nreturn [{\n  json: {\n    reportType: 'SUCCESS_CONFIRMATION',\n    message: `Daily posting CONFIRMED at 10AM IST check`,\n    videoName: data.videoName,\n    youtubeURL: data.youtubeURL,\n    instagramURL: data.instagramURL,\n    postedAt: data.postedAt,\n    totalPosted: data.totalPosted,\n    todayDate: data.todayIST\n  }\n}];\n"
+            },
+            "id": "build-success-report",
+            "name": "📈 Build Success Confirmation",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1060,
+                180
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://api.callmebot.com/whatsapp.php?phone={{$env.WHATSAPP_PHONE}}&text={{encodeURIComponent('✅ *10AM IST Check — All Good!* 📊\\n\\n📅 Date: ' + $json.todayDate + '\\n🎬 Video: ' + $json.videoName + '\\n\\n▶️ YouTube: ' + $json.youtubeURL + '\\n📸 Instagram: ' + $json.instagramURL + '\\n\\n⏰ Posted at: ' + $json.postedAt + '\\n📊 Total videos posted so far: ' + $json.totalPosted)}}&apikey={{$env.CALLMEBOT_API_KEY}}",
+                "options": {}
+            },
+            "id": "whatsapp-daily-report-ok",
+            "name": "📱 WhatsApp: Daily Confirm Report",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1280,
+                180
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Build failure report with full details\nconst data = $json;\nconst lastPost = data.lastPosted || {};\n\nconst reportLines = [\n  '🚨 DEADLINE MISSED REPORT 🚨',\n  '',\n  `📅 Date: ${data.todayIST}`,\n  `🕐 Checked at: ${data.nowIST} IST`,\n  `⏱️ Minutes past deadline: ${data.minutesLate} min`,\n  '',\n  '❌ STATUS: NOT POSTED',\n  '',\n  '📊 Statistics:',\n  `• Total videos posted (all time): ${data.totalPosted}`,\n  `• Last posted date: ${lastPost['Posted Date'] || 'Never'}`,\n  `• Last video: ${lastPost['Video Name'] || 'N/A'}`,\n  '',\n  '🔧 Action Required:',\n  '1. Check n8n workflow logs',\n  '2. Verify API credentials are valid',\n  '3. Check Google Drive folder has videos',\n  '4. Manually trigger workflow if needed'\n];\n\nreturn [{\n  json: {\n    reportType: 'MISSED_DEADLINE',\n    reportText: reportLines.join('\\n'),\n    todayIST: data.todayIST,\n    nowIST: data.nowIST,\n    minutesLate: data.minutesLate,\n    totalPosted: data.totalPosted,\n    lastPostedDate: lastPost['Posted Date'] || 'Never',\n    lastVideoName: lastPost['Video Name'] || 'N/A'\n  }\n}];\n"
+            },
+            "id": "build-failure-report",
+            "name": "📋 Build Failure Report",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1060,
+                420
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://api.callmebot.com/whatsapp.php?phone={{$env.WHATSAPP_PHONE}}&text={{encodeURIComponent($json.reportText)}}&apikey={{$env.CALLMEBOT_API_KEY}}",
+                "options": {}
+            },
+            "id": "whatsapp-failure-report",
+            "name": "📱 WhatsApp: Missed Deadline Report",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1280,
+                420
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "appendOrUpdate",
+                "documentId": {
+                    "__rl": true,
+                    "value": "={{$env.TRACKER_SHEET_ID}}",
+                    "mode": "id"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "MissedDeadlines",
+                    "mode": "name"
+                },
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "Date": "={{$('📋 Build Failure Report').item.json.todayIST}}",
+                        "Checked At": "={{$('📋 Build Failure Report').item.json.nowIST}}",
+                        "Minutes Late": "={{$('📋 Build Failure Report').item.json.minutesLate}}",
+                        "Status": "MISSED",
+                        "Action Taken": "WhatsApp Report Sent",
+                        "Total Posted All Time": "={{$('📋 Build Failure Report').item.json.totalPosted}}"
+                    }
+                },
+                "matchingColumns": [
+                    "Date"
+                ],
+                "options": {
+                    "headerRow": 1
+                }
+            },
+            "id": "log-missed-deadline",
+            "name": "📊 Log Missed Deadline",
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.4,
+            "position": [
+                1500,
+                420
+            ],
+            "credentials": {
+                "googleSheetsOAuth2Api": {
+                    "id": "google-sheets-cred",
+                    "name": "Google Sheets OAuth2"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "operation": "appendOrUpdate",
+                "documentId": {
+                    "__rl": true,
+                    "value": "={{$env.TRACKER_SHEET_ID}}",
+                    "mode": "id"
+                },
+                "sheetName": {
+                    "__rl": true,
+                    "value": "DailyReport",
+                    "mode": "name"
+                },
+                "columns": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "Date": "={{$json.todayDate}}",
+                        "Status": "CONFIRMED",
+                        "Video Name": "={{$json.videoName}}",
+                        "YouTube URL": "={{$json.youtubeURL}}",
+                        "Instagram URL": "={{$json.instagramURL}}",
+                        "Posted At": "={{$json.postedAt}}",
+                        "Total Posted": "={{$json.totalPosted}}",
+                        "10AM Check": "PASSED"
+                    }
+                },
+                "matchingColumns": [
+                    "Date"
+                ],
+                "options": {
+                    "headerRow": 1
+                }
+            },
+            "id": "log-daily-success",
+            "name": "📊 Log Daily Success",
+            "type": "n8n-nodes-base.googleSheets",
+            "typeVersion": 4.4,
+            "position": [
+                1500,
+                180
+            ],
+            "credentials": {
+                "googleSheetsOAuth2Api": {
+                    "id": "google-sheets-cred",
+                    "name": "Google Sheets OAuth2"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "⏰ Deadline Trigger (10AM IST)": {
+            "main": [
+                [
+                    {
+                        "node": "📊 Read Today's Tracker Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "📊 Read Today's Tracker Data": {
+            "main": [
+                [
+                    {
+                        "node": "🔍 Check If Posted Today",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "🔍 Check If Posted Today": {
+            "main": [
+                [
+                    {
+                        "node": "❓ Was it Posted?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "❓ Was it Posted?": {
+            "main": [
+                [
+                    {
+                        "node": "📈 Build Success Confirmation",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "📋 Build Failure Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "📈 Build Success Confirmation": {
+            "main": [
+                [
+                    {
+                        "node": "📱 WhatsApp: Daily Confirm Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "📱 WhatsApp: Daily Confirm Report": {
+            "main": [
+                [
+                    {
+                        "node": "📊 Log Daily Success",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "📋 Build Failure Report": {
+            "main": [
+                [
+                    {
+                        "node": "📱 WhatsApp: Missed Deadline Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "📱 WhatsApp: Missed Deadline Report": {
+            "main": [
+                [
+                    {
+                        "node": "📊 Log Missed Deadline",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1",
+        "saveManualExecutions": true,
+        "callerPolicy": "workflowsFromSameOwner",
+        "timezone": "Asia/Kolkata"
+    },
+    "staticData": null,
+    "tags": [
+        "social-media",
+        "deadline-checker",
+        "monitoring",
+        "whatsapp"
+    ],
+    "triggerCount": 1,
+    "updatedAt": "2026-03-03T00:00:00.000Z",
+    "versionId": "1.0.0"
+}

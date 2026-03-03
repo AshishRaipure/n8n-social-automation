@@ -1,0 +1,607 @@
+{
+  "name": "🎬 Daily Social Media Video Poster",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "⏰ Schedule Trigger (9AM IST)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [180, 300],
+      "notes": "Fires at 03:30 UTC = 09:00 AM IST every day"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.TRACKER_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tracker",
+          "mode": "name"
+        },
+        "options": {
+          "headerRow": 1
+        }
+      },
+      "id": "read-tracker",
+      "name": "📊 Read Video Tracker (Google Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [400, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "list",
+        "folderId": {
+          "__rl": true,
+          "value": "={{$env.GOOGLE_DRIVE_FOLDER_ID}}",
+          "mode": "id"
+        },
+        "options": {
+          "mimeTypeFilter": "video/mp4,video/quicktime,video/x-msvideo,video/mpeg,video/webm"
+        }
+      },
+      "id": "list-drive-files",
+      "name": "📁 List Google Drive Videos",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [620, 300],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-cred",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get tracker data and drive files\nconst trackerRows = $('📊 Read Video Tracker (Google Sheets)').all();\nconst driveFiles = $('📁 List Google Drive Videos').all();\n\n// Build list of posted video IDs from tracker\nconst postedVideoIds = new Set(\n  trackerRows\n    .map(row => row.json['Video ID'])\n    .filter(id => id && id.trim() !== '')\n);\n\n// Filter to only video files, sorted alphabetically/by name\nconst allVideos = driveFiles\n  .map(f => ({\n    id: f.json.id,\n    name: f.json.name,\n    mimeType: f.json.mimeType,\n    size: f.json.size,\n    createdTime: f.json.createdTime\n  }))\n  .filter(f => f.mimeType && f.mimeType.startsWith('video/'))\n  .sort((a, b) => a.name.localeCompare(b.name));\n\n// Find next unposted video\nconst nextVideo = allVideos.find(v => !postedVideoIds.has(v.id));\n\nif (!nextVideo) {\n  // All videos posted — start over or alert\n  return [{\n    json: {\n      status: 'ALL_VIDEOS_POSTED',\n      message: 'All videos in the folder have been posted. Please add more videos.',\n      totalVideos: allVideos.length,\n      postedCount: postedVideoIds.size,\n      timestamp: new Date().toISOString()\n    }\n  }];\n}\n\nconst today = new Date();\nconst dateIST = today.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });\n\nreturn [{\n  json: {\n    status: 'VIDEO_FOUND',\n    videoId: nextVideo.id,\n    videoName: nextVideo.name,\n    videoTitle: nextVideo.name.replace(/\\.[^/.]+$/, '').replace(/[-_]/g, ' '),\n    mimeType: nextVideo.mimeType,\n    fileSize: nextVideo.size,\n    dateIST: dateIST,\n    totalVideos: allVideos.length,\n    postedCount: postedVideoIds.size,\n    remainingCount: allVideos.length - postedVideoIds.size - 1,\n    queuePosition: allVideos.findIndex(v => v.id === nextVideo.id) + 1,\n    timestamp: new Date().toISOString()\n  }\n}];\n"
+      },
+      "id": "determine-next-video",
+      "name": "🧠 Determine Next Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-video-found",
+              "leftValue": "={{$json.status}}",
+              "rightValue": "VIDEO_FOUND",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-video-available",
+      "name": "❓ Video Available?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.callmebot.com/whatsapp.php?phone={{$env.WHATSAPP_PHONE}}&text={{encodeURIComponent('⚠️ *Social Poster Alert*\\n\\nAll videos in Google Drive folder have been posted!\\n\\nPlease add more videos to the folder to continue daily posting.\\n\\n📅 Date: ' + $('🧠 Determine Next Video').item.json.dateIST + '\\n📊 Total Posted: ' + $('🧠 Determine Next Video').item.json.postedCount + ' videos')}}&apikey={{$env.CALLMEBOT_API_KEY}}",
+        "options": {}
+      },
+      "id": "whatsapp-no-video",
+      "name": "📱 WhatsApp: No Videos Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1280, 500]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{$json.videoId}}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "download-video",
+      "name": "⬇️ Download Video from Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1280, 280],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "google-drive-cred",
+          "name": "Google Drive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate engaging captions with strategic hashtags\nconst videoData = $('🧠 Determine Next Video').item.json;\nconst rawTitle = videoData.videoTitle || 'Amazing Video';\n\n// Capitalize words\nconst formatTitle = (str) => str\n  .split(' ')\n  .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())\n  .join(' ');\n\nconst cleanTitle = formatTitle(rawTitle);\n\n// Caption templates for variety and engagement\nconst captionTemplates = [\n  `✨ ${cleanTitle}\\n\\nEvery day is a new opportunity to create something amazing! Today's content is here to inspire, educate, and entertain you. 🎯\\n\\nDrop a 🔥 if you loved this! Share with someone who needs to see this today.\\n\\n👇 Comment below — what do you want to see next?`,\n  \n  `🎬 ${cleanTitle}\\n\\nWe show up EVERY. SINGLE. DAY. Because consistency is the real secret to success. 💪\\n\\nTag a friend who needs this content! 👥\\n\\n📌 Save this post for later — you'll thank yourself! \\n\\nDouble tap if this resonated with you! ❤️`,\n  \n  `🚀 ${cleanTitle}\\n\\nMost people scroll past content like this. The ones who STOP and ENGAGE are the ones who grow. 🌱\\n\\nWhich part hit different for you? Tell us in the comments! 👇\\n\\n💾 Save + Share = More amazing content coming your way!`,\n  \n  `💡 ${cleanTitle}\\n\\nYou found this for a reason. The algorithm brought you here — don't ignore the sign! 🙏\\n\\nHit LIKE if you agree + FOLLOW for daily uploads! \\n\\n🎯 Our mission: deliver value every single day. Did we succeed today? Comment YES or NO!`,\n  \n  `⚡ ${cleanTitle}\\n\\nStop scrolling — THIS is the content you've been looking for. 🎯\\n\\nOur community gets FIRST ACCESS to everything. Hit that FOLLOW button NOW! 🔔\\n\\n📢 Share this with 3 friends and spread the value!`\n];\n\n// Pick a template based on day of week for variety\nconst dayOfWeek = new Date().getDay();\nconst selectedTemplate = captionTemplates[dayOfWeek % captionTemplates.length];\n\n// Strategic hashtag sets for maximum reach\nconst coreHashtags = `#viral #trending #fyp #foryou #foryoupage #explore #reels #reelsinstagram #video`;\n\nconst engagementHashtags = `#follow #like #share #comment #save #explorepage #instagram #youtube #content`;\n\nconst growthHashtags = `#grow #growyouraccount #socialmedia #socialmediamarketing #contentcreator #creator #digitalmarketing #onlinebusiness #motivation`;\n\nconst niche1 = `#dailycontent #dailypost #everyday #consistency #contentcreation #videocontent #shortsvideo`;\n\n// Full caption for Instagram (2200 char limit)\nconst instagramCaption = `${selectedTemplate}\\n\\n━━━━━━━━━━━━━━━━━━\\n${coreHashtags} ${engagementHashtags} ${growthHashtags} ${niche1}`;\n\n// YouTube description (more SEO focused)\nconst youtubeDescription = `${selectedTemplate}\\n\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\n📌 SUBSCRIBE for daily videos — New content EVERY DAY at 9 AM!\\n🔔 Hit the Bell Icon to never miss an upload!\\n\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\n👇 LET'S CONNECT!\\n📸 Instagram: https://instagram.com/{{YOUR_INSTAGRAM}}\\n🎬 YouTube: https://youtube.com/{{YOUR_CHANNEL}}\\n\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\n🔑 KEYWORDS & TAGS\\n${coreHashtags} ${engagementHashtags} ${growthHashtags}\\n\\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\n⚠️ COPYRIGHT DISCLAIMER\\nAll content is original and owned by this channel.`;\n\n// YouTube tags (for metadata)\nconst youtubeTags = [\n  cleanTitle,\n  'viral', 'trending', 'fyp', 'foryou', 'reels', 'shorts',\n  'daily content', 'content creator', 'motivation', 'inspiration',\n  'social media', 'youtube', 'instagram', 'video', 'consistency',\n  'grow your account', 'digital marketing', 'online business'\n];\n\nconst today = new Date();\nconst youtubeTitle = `${cleanTitle} | ${today.toLocaleDateString('en-IN', {timeZone:'Asia/Kolkata', day:'2-digit', month:'short', year:'numeric'})}`;\n\nreturn [{\n  json: {\n    videoId: videoData.videoId,\n    videoName: videoData.videoName,\n    cleanTitle: cleanTitle,\n    youtubeTitle: youtubeTitle,\n    instagramCaption: instagramCaption,\n    youtubeDescription: youtubeDescription,\n    youtubeTags: youtubeTags,\n    dateIST: videoData.dateIST,\n    queuePosition: videoData.queuePosition,\n    remainingCount: videoData.remainingCount,\n    timestamp: videoData.timestamp\n  }\n}];\n"
+      },
+      "id": "generate-caption",
+      "name": "✍️ Generate Caption & Hashtags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 280]
+    },
+    {
+      "parameters": {
+        "title": "={{$json.youtubeTitle}}",
+        "description": "={{$json.youtubeDescription}}",
+        "options": {
+          "tags": "={{$json.youtubeTags.join(',')}}",
+          "privacyStatus": "public",
+          "categoryId": "22",
+          "stabilize": false
+        }
+      },
+      "id": "upload-youtube",
+      "name": "▶️ Upload to YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [1720, 160],
+      "credentials": {
+        "youTubeOAuth2Api": {
+          "id": "youtube-cred",
+          "name": "YouTube OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/{{$env.INSTAGRAM_ACCOUNT_ID}}/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "media_type",
+              "value": "REELS"
+            },
+            {
+              "name": "video_url",
+              "value": "=https://drive.google.com/uc?export=download&id={{$('✍️ Generate Caption & Hashtags').item.json.videoId}}"
+            },
+            {
+              "name": "caption",
+              "value": "={{$('✍️ Generate Caption & Hashtags').item.json.instagramCaption}}"
+            },
+            {
+              "name": "share_to_feed",
+              "value": "true"
+            },
+            {
+              "name": "access_token",
+              "value": "={{$env.INSTAGRAM_ACCESS_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "instagram-create-container",
+      "name": "📸 Instagram: Create Media Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1720, 340]
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "wait-for-processing",
+      "name": "⏳ Wait 60s (Video Processing)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1940, 340],
+      "webhookId": "wait-insta-process"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://graph.facebook.com/v18.0/{{$('📸 Instagram: Create Media Container').item.json.id}}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "status_code,status"
+            },
+            {
+              "name": "access_token",
+              "value": "={{$env.INSTAGRAM_ACCESS_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-insta-status",
+      "name": "🔍 Check Instagram Container Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2160, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-ready",
+              "leftValue": "={{$json.status_code}}",
+              "rightValue": "FINISHED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-insta-ready",
+      "name": "❓ Instagram Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2380, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/{{$env.INSTAGRAM_ACCOUNT_ID}}/media_publish",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "creation_id",
+              "value": "={{$('📸 Instagram: Create Media Container').item.json.id}}"
+            },
+            {
+              "name": "access_token",
+              "value": "={{$env.INSTAGRAM_ACCESS_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "publish-instagram",
+      "name": "🚀 Publish Instagram Reel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, 280]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$env.TRACKER_SHEET_ID}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Tracker",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Video ID": "={{$('✍️ Generate Caption & Hashtags').item.json.videoId}}",
+            "Video Name": "={{$('✍️ Generate Caption & Hashtags').item.json.videoName}}",
+            "YouTube Title": "={{$('✍️ Generate Caption & Hashtags').item.json.youtubeTitle}}",
+            "YouTube Video ID": "={{$('▶️ Upload to YouTube').item.json.id}}",
+            "Instagram Post ID": "={{$('🚀 Publish Instagram Reel').item.json.id}}",
+            "Posted Date": "={{$('✍️ Generate Caption & Hashtags').item.json.dateIST}}",
+            "Status": "POSTED",
+            "Instagram URL": "=https://www.instagram.com/p/{{$('🚀 Publish Instagram Reel').item.json.id}}/",
+            "YouTube URL": "=https://www.youtube.com/watch?v={{$('▶️ Upload to YouTube').item.json.id}}",
+            "Posted At": "={{new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'})}}"
+          }
+        },
+        "matchingColumns": ["Video ID"],
+        "options": {
+          "headerRow": 1
+        }
+      },
+      "id": "update-tracker",
+      "name": "📊 Update Tracker Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [2820, 280],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-cred",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.callmebot.com/whatsapp.php?phone={{$env.WHATSAPP_PHONE}}&text={{encodeURIComponent('✅ *Daily Post SUCCESS!* 🎉\\n\\n📅 Date: ' + $('✍️ Generate Caption & Hashtags').item.json.dateIST + '\\n🎬 Video: ' + $('✍️ Generate Caption & Hashtags').item.json.cleanTitle + '\\n\\n▶️ YouTube: https://youtube.com/watch?v=' + $('▶️ Upload to YouTube').item.json.id + '\\n📸 Instagram: Posted Successfully\\n\\n📊 Queue: ' + $('✍️ Generate Caption & Hashtags').item.json.remainingCount + ' videos remaining\\n⏰ Posted at: ' + new Date().toLocaleTimeString('en-IN', {timeZone:'Asia/Kolkata'}) + ' IST')}}&apikey={{$env.CALLMEBOT_API_KEY}}",
+        "options": {}
+      },
+      "id": "whatsapp-success",
+      "name": "📱 WhatsApp: Success Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3040, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log the failed Instagram container status for reporting\nconst containerStatus = $json;\nconst captionData = $('✍️ Generate Caption & Hashtags').item.json;\n\nreturn [{\n  json: {\n    failReason: 'Instagram container status: ' + (containerStatus.status_code || 'UNKNOWN'),\n    videoName: captionData.cleanTitle,\n    videoId: captionData.videoId,\n    dateIST: captionData.dateIST,\n    containerStatus: containerStatus\n  }\n}];\n"
+      },
+      "id": "instagram-failed",
+      "name": "❌ Instagram Container Failed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2600, 480]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.callmebot.com/whatsapp.php?phone={{$env.WHATSAPP_PHONE}}&text={{encodeURIComponent('⚠️ *Instagram Post FAILED* \\n\\n📅 Date: ' + $json.dateIST + '\\n🎬 Video: ' + $json.videoName + '\\n\\n❌ Reason: ' + $json.failReason + '\\n\\n🔧 Action needed: Check n8n logs and retry manually.')}}&apikey={{$env.CALLMEBOT_API_KEY}}",
+        "options": {}
+      },
+      "id": "whatsapp-insta-failed",
+      "name": "📱 WhatsApp: Instagram Failed Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2820, 480]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Catch-all error handler for the workflow\nconst errorData = $json;\nconst now = new Date().toLocaleString('en-IN', {timeZone: 'Asia/Kolkata'});\n\nreturn [{\n  json: {\n    errorType: 'WORKFLOW_ERROR',\n    error: errorData.message || 'Unknown error occurred',\n    node: errorData.node?.name || 'Unknown node',\n    timestamp: now,\n    rawError: JSON.stringify(errorData).substring(0, 500)\n  }\n}];\n"
+      },
+      "id": "error-handler",
+      "name": "🚨 Error Handler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 520]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.callmebot.com/whatsapp.php?phone={{$env.WHATSAPP_PHONE}}&text={{encodeURIComponent('🚨 *WORKFLOW ERROR!*\\n\\nThe daily social posting workflow FAILED.\\n\\n❌ Error: ' + $json.error + '\\n📍 Node: ' + $json.node + '\\n⏰ Time: ' + $json.timestamp + ' IST\\n\\nPlease check n8n at ' + $env.N8N_URL + ' immediately!')}}&apikey={{$env.CALLMEBOT_API_KEY}}",
+        "options": {}
+      },
+      "id": "whatsapp-error",
+      "name": "📱 WhatsApp: Error Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1060, 520]
+    }
+  ],
+  "connections": {
+    "⏰ Schedule Trigger (9AM IST)": {
+      "main": [
+        [
+          {
+            "node": "📊 Read Video Tracker (Google Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Read Video Tracker (Google Sheets)": {
+      "main": [
+        [
+          {
+            "node": "📁 List Google Drive Videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📁 List Google Drive Videos": {
+      "main": [
+        [
+          {
+            "node": "🧠 Determine Next Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 Determine Next Video": {
+      "main": [
+        [
+          {
+            "node": "❓ Video Available?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Video Available?": {
+      "main": [
+        [
+          {
+            "node": "⬇️ Download Video from Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📱 WhatsApp: No Videos Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⬇️ Download Video from Drive": {
+      "main": [
+        [
+          {
+            "node": "✍️ Generate Caption & Hashtags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✍️ Generate Caption & Hashtags": {
+      "main": [
+        [
+          {
+            "node": "▶️ Upload to YouTube",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📸 Instagram: Create Media Container",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📸 Instagram: Create Media Container": {
+      "main": [
+        [
+          {
+            "node": "⏳ Wait 60s (Video Processing)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏳ Wait 60s (Video Processing)": {
+      "main": [
+        [
+          {
+            "node": "🔍 Check Instagram Container Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Check Instagram Container Status": {
+      "main": [
+        [
+          {
+            "node": "❓ Instagram Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Instagram Ready?": {
+      "main": [
+        [
+          {
+            "node": "🚀 Publish Instagram Reel",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Instagram Container Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚀 Publish Instagram Reel": {
+      "main": [
+        [
+          {
+            "node": "📊 Update Tracker Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Update Tracker Sheet": {
+      "main": [
+        [
+          {
+            "node": "📱 WhatsApp: Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❌ Instagram Container Failed": {
+      "main": [
+        [
+          {
+            "node": "📱 WhatsApp: Instagram Failed Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚨 Error Handler": {
+      "main": [
+        [
+          {
+            "node": "📱 WhatsApp: Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "deadline-checker-workflow",
+    "timezone": "Asia/Kolkata"
+  },
+  "staticData": null,
+  "tags": ["social-media", "automation", "instagram", "youtube", "daily-post"],
+  "triggerCount": 1,
+  "updatedAt": "2026-03-03T00:00:00.000Z",
+  "versionId": "1.0.0"
+}
