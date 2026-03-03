@@ -16,7 +16,10 @@
       "name": "⏰ Schedule Trigger (9AM IST)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [180, 300],
+      "position": [
+        180,
+        300
+      ],
       "notes": "Fires at 03:30 UTC = 09:00 AM IST every day"
     },
     {
@@ -40,7 +43,10 @@
       "name": "📊 Read Video Tracker (Google Sheets)",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [400, 300],
+      "position": [
+        400,
+        300
+      ],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "google-sheets-cred",
@@ -53,7 +59,7 @@
         "operation": "list",
         "folderId": {
           "__rl": true,
-          "value": "={{$env.GOOGLE_DRIVE_FOLDER_ID}}",
+          "value": "1ISna61imldy9Q0q4BEjXDtLtayjH1D2D",
           "mode": "id"
         },
         "options": {
@@ -64,7 +70,10 @@
       "name": "📁 List Google Drive Videos",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [620, 300],
+      "position": [
+        620,
+        300
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "google-drive-cred",
@@ -74,13 +83,16 @@
     },
     {
       "parameters": {
-        "jsCode": "// Get tracker data and drive files\nconst trackerRows = $('📊 Read Video Tracker (Google Sheets)').all();\nconst driveFiles = $('📁 List Google Drive Videos').all();\n\n// Build list of posted video IDs from tracker\nconst postedVideoIds = new Set(\n  trackerRows\n    .map(row => row.json['Video ID'])\n    .filter(id => id && id.trim() !== '')\n);\n\n// Filter to only video files, sorted alphabetically/by name\nconst allVideos = driveFiles\n  .map(f => ({\n    id: f.json.id,\n    name: f.json.name,\n    mimeType: f.json.mimeType,\n    size: f.json.size,\n    createdTime: f.json.createdTime\n  }))\n  .filter(f => f.mimeType && f.mimeType.startsWith('video/'))\n  .sort((a, b) => a.name.localeCompare(b.name));\n\n// Find next unposted video\nconst nextVideo = allVideos.find(v => !postedVideoIds.has(v.id));\n\nif (!nextVideo) {\n  // All videos posted — start over or alert\n  return [{\n    json: {\n      status: 'ALL_VIDEOS_POSTED',\n      message: 'All videos in the folder have been posted. Please add more videos.',\n      totalVideos: allVideos.length,\n      postedCount: postedVideoIds.size,\n      timestamp: new Date().toISOString()\n    }\n  }];\n}\n\nconst today = new Date();\nconst dateIST = today.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });\n\nreturn [{\n  json: {\n    status: 'VIDEO_FOUND',\n    videoId: nextVideo.id,\n    videoName: nextVideo.name,\n    videoTitle: nextVideo.name.replace(/\\.[^/.]+$/, '').replace(/[-_]/g, ' '),\n    mimeType: nextVideo.mimeType,\n    fileSize: nextVideo.size,\n    dateIST: dateIST,\n    totalVideos: allVideos.length,\n    postedCount: postedVideoIds.size,\n    remainingCount: allVideos.length - postedVideoIds.size - 1,\n    queuePosition: allVideos.findIndex(v => v.id === nextVideo.id) + 1,\n    timestamp: new Date().toISOString()\n  }\n}];\n"
+        "jsCode": "// Get tracker data and drive files\nconst trackerRows = $('📊 Read Video Tracker (Google Sheets)').all();\nconst driveFiles = $('📁 List Google Drive Videos').all();\n\n// Build list of posted video IDs from tracker\nconst postedVideoIds = new Set(\n  trackerRows\n    .map(row => row.json['Video ID'])\n    .filter(id => id && id.trim() !== '')\n);\n\n// Naming convention: IG-MZ(N).mp4 — extract N for numeric sort\nconst extractIndex = (name) => {\n  const match = name.match(/IG-MZ\\((\\d+)\\)/i);\n  return match ? parseInt(match[1], 10) : Infinity;\n};\n\n// Filter to only video files, sorted by IG-MZ(N) index\nconst allVideos = driveFiles\n  .map(f => ({\n    id: f.json.id,\n    name: f.json.name,\n    mimeType: f.json.mimeType,\n    size: f.json.size,\n    createdTime: f.json.createdTime\n  }))\n  .filter(f => f.mimeType && f.mimeType.startsWith('video/'))\n  .sort((a, b) => extractIndex(a.name) - extractIndex(b.name));\n\n// Find next unposted video\nconst nextVideo = allVideos.find(v => !postedVideoIds.has(v.id));\n\nif (!nextVideo) {\n  // All videos posted — start over or alert\n  return [{\n    json: {\n      status: 'ALL_VIDEOS_POSTED',\n      message: 'All videos in the folder have been posted. Please add more videos.',\n      totalVideos: allVideos.length,\n      postedCount: postedVideoIds.size,\n      timestamp: new Date().toISOString()\n    }\n  }];\n}\n\nconst today = new Date();\nconst dateIST = today.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });\n\nreturn [{\n  json: {\n    status: 'VIDEO_FOUND',\n    videoId: nextVideo.id,\n    videoName: nextVideo.name,\n    videoTitle: nextVideo.name.replace(/\\.[^/.]+$/, '').replace(/[-_]/g, ' '),\n    mimeType: nextVideo.mimeType,\n    fileSize: nextVideo.size,\n    dateIST: dateIST,\n    totalVideos: allVideos.length,\n    postedCount: postedVideoIds.size,\n    remainingCount: allVideos.length - postedVideoIds.size - 1,\n    queuePosition: allVideos.findIndex(v => v.id === nextVideo.id) + 1,\n    timestamp: new Date().toISOString()\n  }\n}];\n"
       },
       "id": "determine-next-video",
       "name": "🧠 Determine Next Video",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 300]
+      "position": [
+        840,
+        300
+      ]
     },
     {
       "parameters": {
@@ -109,7 +121,10 @@
       "name": "❓ Video Available?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1060, 300]
+      "position": [
+        1060,
+        300
+      ]
     },
     {
       "parameters": {
@@ -120,7 +135,10 @@
       "name": "📱 WhatsApp: No Videos Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1280, 500]
+      "position": [
+        1280,
+        500
+      ]
     },
     {
       "parameters": {
@@ -136,7 +154,10 @@
       "name": "⬇️ Download Video from Drive",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
-      "position": [1280, 280],
+      "position": [
+        1280,
+        280
+      ],
       "credentials": {
         "googleDriveOAuth2Api": {
           "id": "google-drive-cred",
@@ -152,7 +173,10 @@
       "name": "✍️ Generate Caption & Hashtags",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1500, 280]
+      "position": [
+        1500,
+        280
+      ]
     },
     {
       "parameters": {
@@ -169,7 +193,10 @@
       "name": "▶️ Upload to YouTube",
       "type": "n8n-nodes-base.youTube",
       "typeVersion": 1,
-      "position": [1720, 160],
+      "position": [
+        1720,
+        160
+      ],
       "credentials": {
         "youTubeOAuth2Api": {
           "id": "youtube-cred",
@@ -214,7 +241,10 @@
       "name": "📸 Instagram: Create Media Container",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1720, 340]
+      "position": [
+        1720,
+        340
+      ]
     },
     {
       "parameters": {
@@ -225,7 +255,10 @@
       "name": "⏳ Wait 60s (Video Processing)",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
-      "position": [1940, 340],
+      "position": [
+        1940,
+        340
+      ],
       "webhookId": "wait-insta-process"
     },
     {
@@ -251,7 +284,10 @@
       "name": "🔍 Check Instagram Container Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2160, 340]
+      "position": [
+        2160,
+        340
+      ]
     },
     {
       "parameters": {
@@ -280,7 +316,10 @@
       "name": "❓ Instagram Ready?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2380, 340]
+      "position": [
+        2380,
+        340
+      ]
     },
     {
       "parameters": {
@@ -305,7 +344,10 @@
       "name": "🚀 Publish Instagram Reel",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2600, 280]
+      "position": [
+        2600,
+        280
+      ]
     },
     {
       "parameters": {
@@ -335,7 +377,9 @@
             "Posted At": "={{new Date().toLocaleString('en-IN', {timeZone:'Asia/Kolkata'})}}"
           }
         },
-        "matchingColumns": ["Video ID"],
+        "matchingColumns": [
+          "Video ID"
+        ],
         "options": {
           "headerRow": 1
         }
@@ -344,7 +388,10 @@
       "name": "📊 Update Tracker Sheet",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [2820, 280],
+      "position": [
+        2820,
+        280
+      ],
       "credentials": {
         "googleSheetsOAuth2Api": {
           "id": "google-sheets-cred",
@@ -361,7 +408,10 @@
       "name": "📱 WhatsApp: Success Notification",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [3040, 280]
+      "position": [
+        3040,
+        280
+      ]
     },
     {
       "parameters": {
@@ -371,7 +421,10 @@
       "name": "❌ Instagram Container Failed",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2600, 480]
+      "position": [
+        2600,
+        480
+      ]
     },
     {
       "parameters": {
@@ -382,7 +435,10 @@
       "name": "📱 WhatsApp: Instagram Failed Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2820, 480]
+      "position": [
+        2820,
+        480
+      ]
     },
     {
       "parameters": {
@@ -392,7 +448,10 @@
       "name": "🚨 Error Handler",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [840, 520]
+      "position": [
+        840,
+        520
+      ]
     },
     {
       "parameters": {
@@ -403,7 +462,10 @@
       "name": "📱 WhatsApp: Error Alert",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1060, 520]
+      "position": [
+        1060,
+        520
+      ]
     }
   ],
   "connections": {
@@ -600,7 +662,13 @@
     "timezone": "Asia/Kolkata"
   },
   "staticData": null,
-  "tags": ["social-media", "automation", "instagram", "youtube", "daily-post"],
+  "tags": [
+    "social-media",
+    "automation",
+    "instagram",
+    "youtube",
+    "daily-post"
+  ],
   "triggerCount": 1,
   "updatedAt": "2026-03-03T00:00:00.000Z",
   "versionId": "1.0.0"
